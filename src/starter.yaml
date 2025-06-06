@@ -1,0 +1,180 @@
+################################################################################
+# /home/abdul/fire_ws/src/burger.yaml
+################################################################################
+
+amcl:
+  ros__parameters:
+    use_sim_time: true
+    alpha1: 0.2
+    alpha2: 0.2
+    alpha3: 0.2
+    alpha4: 0.2
+    alpha5: 0.1
+    base_frame_id: "base_link"
+    odom_frame_id: "odom"
+    scan_topic: "scan"
+    update_min_d: 0.2
+    update_min_a: 0.2
+    resample_interval: 1
+    transform_tolerance: 1.0
+    recovery_alpha_slow: 0.001
+    recovery_alpha_fast: 0.1
+    initial_pose_x: 0.0
+    initial_pose_y: 0.0
+    initial_pose_a: 0.0
+
+bt_navigator:
+  ros__parameters:
+    use_sim_time: true
+    default_bt_xml_filename: "navigate_w_replanning_and_recovery.xml"
+    bt_loop_rate: 20
+    transform_tolerance: 0.1
+    goal_checker_plugin: "nav2_costmap_2d::GoalChecker"
+    progress_checker_plugin: "nav2_progress_checker::ProgressChecker"
+
+controller_server:
+  ros__parameters:
+    use_sim_time: true
+    expected_controller_frequency: 20.0
+    controller_plugins: ["RegulatedPurePursuit", "FollowPath"]
+    RegulatedPurePursuit:
+      plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
+    FollowPath:
+      plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
+    max_vel_x: 0.22
+    min_vel_x: 0.05
+    max_vel_theta: 2.84
+    min_vel_theta: -2.84
+    acc_lim_x: 2.5
+    acc_lim_theta: 3.2
+    goal_tolerance: 0.25
+    xy_goal_tolerance: 0.25
+    yaw_goal_tolerance: 0.1
+    lookahead_dist: 0.5
+
+planner_server:
+  ros__parameters:
+    use_sim_time: true
+    planner_plugins: ["GridBased"]
+    GridBased:
+      plugin: "nav2_navfn_planner/NavfnPlanner"
+      tolerance: 0.5
+
+recoveries_server:
+  ros__parameters:
+    use_sim_time: true
+    recovery_behaviors: ["spin", "backup"]
+    spin:
+      plugin: "nav2_recoveries::Spin"
+      spin_min_angle: 1.57
+      spin_max_angle: 3.14
+      spin_vel: 0.6
+    backup:
+      plugin: "nav2_recoveries::BackUp"
+      backup_dist: 0.2
+      backup_vel: 0.1
+
+map_server:
+  ros__parameters:
+    use_sim_time: true
+    subscribe_to_updates: true    # Important if using SLAM toolbox live map
+    topic: /map
+    frame_id: map
+
+local_costmap:
+  ros__parameters:
+    use_sim_time: true
+    global_frame: map
+    robot_base_frame: base_footprint
+    update_frequency: 5.0
+    publish_frequency: 2.0
+    rolling_window: true
+    width: 3.0
+    height: 3.0
+    resolution: 0.05
+    plugins:
+      - {name: static_layer,   type: "nav2_costmap_2d::StaticLayer"}
+      - {name: obstacle_layer, type: "nav2_costmap_2d::ObstacleLayer"}
+      - {name: inflation_layer,type: "nav2_costmap_2d::InflationLayer"}
+
+    static_layer:
+      map_topic: "/map"
+      enabled: true
+      subscribe_to_updates: true
+
+    obstacle_layer:
+      enabled: true
+      observation_sources: fire_scan
+
+      fire_scan:
+        topic: /fire_scan
+        sensor_frame: "base_scan"
+        data_type: LaserScan
+        marking: true
+        clearing: true
+        min_obstacle_height: 0.0
+        max_obstacle_height: 2.0
+        obstacle_range: 2.5
+        raytrace_range: 3.0
+        expected_update_rate: 1.0
+        observation_persistence: 0.0
+
+    inflation_layer:
+      enabled: true
+      inflation_radius: 0.5
+      cost_scaling_factor: 10.0
+
+global_costmap:
+  ros__parameters:
+    use_sim_time: true
+    global_frame: map
+    robot_base_frame: base_footprint
+    update_frequency: 1.0
+    publish_frequency: 0.5
+    rolling_window: false
+    width: 10.0
+    height: 10.0
+    resolution: 0.05
+    plugins:
+      - {name: static_layer,   type: "nav2_costmap_2d::StaticLayer"}
+      - {name: obstacle_layer, type: "nav2_costmap_2d::ObstacleLayer"}
+      - {name: inflation_layer,type: "nav2_costmap_2d::InflationLayer"}
+
+    static_layer:
+      map_topic: "/map"
+      enabled: true
+      subscribe_to_updates: true
+
+    obstacle_layer:
+      enabled: true
+      observation_sources: /fire_scan # ← must match the name below exactly
+
+      fire_scan:
+        topic: /fire_scan
+        sensor_frame: "base_scan"
+        data_type: LaserScan
+        marking: true
+        clearing: true
+        min_obstacle_height: 0.0
+        max_obstacle_height: 2.0
+        obstacle_range: 10.0    # increase so global costmap sees farther‐away fire
+        raytrace_range: 12.0
+        expected_update_rate: 1.0
+        observation_persistence: 0.0
+
+    inflation_layer:
+      enabled: true
+      inflation_radius: 0.5
+      cost_scaling_factor: 10.0
+
+nav2_lifecycle_manager:
+  ros__parameters:
+    use_sim_time: true
+    autostart: true
+    node_names:
+      - "map_server"
+      - "amcl"
+      - "planner_server"
+      - "controller_server"
+      - "recoveries_server"
+      - "bt_navigator"
