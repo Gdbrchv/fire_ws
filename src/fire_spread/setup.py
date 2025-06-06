@@ -15,13 +15,12 @@ setup(
     zip_safe=True,
     maintainer='abdul',
     maintainer_email='a.m.z.gadaborchev@student.tue.nl',
-    description='TODO: Package description',
-    license='TODO: License declaration',
+    description='Simulate fire spread and exploration logic in ROS 2 + Gazebo',
+    license='Apache-2.0',
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             'fire_spread_node = fire_spread.fire_spread_node:main',
-	    'explorer_node = fire_spread.explorer_node:main',
-        ],
+            'spawn_pillar_fire = fire_spread.spawn_pillar_fire:main',        ],
     },
 )
