@@ -4,10 +4,13 @@ from rclpy.node import Node
 from geometry_msgs.msg import PointStamped
 from gazebo_msgs.srv import SpawnEntity
 import random, math
+from std_msgs.msg import Header
 
 class PillarPlume:
     """Tracks state for one plume of pillars."""
     def __init__(self, center_x, center_y, frame_id, params, spawn_fn):
+        self.hb_pub = self.create_publisher(Header, 'sync/heartbeat', 10)
+        self.create_timer(1.0, self._pub_heartbeat)
         self.cx = center_x
         self.cy = center_y
         self.frame = frame_id
@@ -31,7 +34,11 @@ class PillarPlume:
             if not self.eligible:
                 break
             self._spawn_one()
-
+    def _pub_heartbeat(self):
+        hdr = Header()
+        hdr.stamp = self.get_clock().now().to_msg()
+        hdr.frame_id = self.get_name()    # e.g. "navigator" or "bridge_node"
+        self.hb_pub.publish(hdr)
     def _spawn_one(self):
         parent = random.choice(self.eligible)
         px, py = parent['x'], parent['y']
@@ -64,7 +71,9 @@ class PillarPlume:
 class ImprovedFireSpawner(Node):
     def __init__(self):
         super().__init__('improved_fire_spawner')
-
+        self.hb_pub = self.create_publisher(Header, 'sync/heartbeat', 10)
+        self.create_timer(1.0, self._pub_heartbeat)
+        
         self.declare_parameter('pillar_radius',           0.025)
         self.declare_parameter('spawn_interval',          0.75)
         self.declare_parameter('max_per_tick',            3)
@@ -99,7 +108,6 @@ class ImprovedFireSpawner(Node):
             'wall_y_max':              p('wall_y_max').value,
         }
 
-  
         self.create_subscription(
             PointStamped,
             '/fire_triggers',
@@ -145,6 +153,11 @@ class ImprovedFireSpawner(Node):
 
         self.get_logger().info("ImprovedFireSpawner ready.")
 
+    def _pub_heartbeat(self):
+      hdr = Header()
+      hdr.stamp = self.get_clock().now().to_msg()
+      hdr.frame_id = self.get_name()    # e.g. "navigator" or "bridge_node"
+      self.hb_pub.publish(hdr)
     def _spawn_entity(self, x, y, frame):
         idx = self.next_idx; self.next_idx += 1
         req = SpawnEntity.Request()

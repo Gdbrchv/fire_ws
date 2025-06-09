@@ -5,6 +5,7 @@ from rclpy.node import Node
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 import math
+from std_msgs.msg import Header
 
 def quaternion_to_yaw(x, y, z, w):
     siny = 2.0 * (w * z + x * y)
@@ -14,10 +15,10 @@ def quaternion_to_yaw(x, y, z, w):
 class SegmentedNavigator(Node):
     def __init__(self):
         super().__init__('segmented_navigator')
-        self.cmd_pub = self.create_publisher(Twist, 'cmd_vel', 10)
         self.create_subscription(Odometry, 'odom', self.odom_cb, 10)
-
-        # All four points now
+        self.create_timer(1.0, self._pub_heartbeat)
+        self.cmd_pub = self.create_publisher(Twist, 'cmd_vel', 10)
+        self.hb_pub = self.create_publisher(Header, 'sync/heartbeat', 10)
         self.waypoints = [
             (1.0, -0.8),   # WP1
             (3.0, -0.8),    # WP2
@@ -112,6 +113,11 @@ class SegmentedNavigator(Node):
 
         self.cmd_pub.publish(twist)
 
+    def _pub_heartbeat(self):
+      hdr = Header()
+      hdr.stamp = self.get_clock().now().to_msg()
+      hdr.frame_id = self.get_name()    # e.g. "navigator" or "bridge_node"
+      self.hb_pub.publish(hdr)
 
 def main(args=None):
     rclpy.init(args=args)
