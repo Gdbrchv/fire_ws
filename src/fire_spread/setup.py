@@ -1,3 +1,4 @@
+from glob import glob
 from setuptools import find_packages, setup
 
 package_name = 'fire_spread'
@@ -7,11 +8,16 @@ setup(
     version='0.0.0',
     packages=find_packages(exclude=['test']),
     data_files=[
-        ('share/ament_index/resource_index/packages',
-            ['resource/' + package_name]),
-        ('share/' + package_name, ['package.xml']),
+        ('share/ament_index/resource_index/packages', [f'resource/{package_name}']),
+        ('share/fire_spread/launch', glob('launch/*.launch.py')),
+        ('share/fire_spread', ['package.xml']),
     ],
-    install_requires=['setuptools'],
+    install_requires=[
+        'setuptools',
+        'your_detection_msgs',
+        'numpy',
+        'scikit-learn',
+    ],
     zip_safe=True,
     maintainer='abdul',
     maintainer_email='a.m.z.gadaborchev@student.tue.nl',
@@ -20,7 +26,10 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'fire_spread_node = fire_spread.fire_spread_node:main',
-            'spawn_pillar_fire = fire_spread.spawn_pillar_fire:main',        ],
+            'victim_rescue = fire_spread.victim_rescue_node:main',
+            'spawn_pillar_fire = fire_spread.spawn_pillar_fire:main',
+            'navigator = fire_spread.navigator:main',
+            'detector = fire_spread.bottle_detector:main',
+        ],
     },
 )

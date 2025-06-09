@@ -10,7 +10,7 @@
   </description>
   <maintainer email="a.m.z.gadaborchev@student.tue.nl">abdul</maintainer>
   <license>Apache-2.0</license>
-
+  <depend>your_detection_msgs</depend>
   <exec_depend>rclpy</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>nav_msgs</exec_depend>
@@ -18,6 +18,12 @@
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>gazebo_ros</exec_depend>
   <exec_depend>gazebo_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>tf2_geometry_msgs</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>turtlebot3_gazebo</exec_depend>
+  <exec_depend>turtlebot3_navigation2</exec_depend>
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
   <test_depend>pytest</test_depend>
