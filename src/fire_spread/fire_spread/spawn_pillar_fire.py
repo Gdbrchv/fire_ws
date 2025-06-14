@@ -1,219 +1,152 @@
 #!/usr/bin/env python3
+import math
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import PointStamped
 from gazebo_msgs.srv import SpawnEntity
-import random, math
-from std_msgs.msg import Header
 
-class PillarPlume:
-    """Tracks state for one plume of pillars."""
-    def __init__(self, center_x, center_y, frame_id, params, spawn_fn):
-        self.hb_pub = self.create_publisher(Header, 'sync/heartbeat', 10)
-        self.create_timer(1.0, self._pub_heartbeat)
-        self.cx = center_x
-        self.cy = center_y
-        self.frame = frame_id
-        self.params = params
-        self.spawn_fn = spawn_fn
-
-        self.eligible = [{'x': center_x, 'y': center_y, 'children': 0}]
-        self.step = 3.0 * params['pillar_radius']
-        self.survival = params['max_children_per_parent']
-        self.done = False
-        
-
-    def tick(self):
-        """Spawn a batch; retire plume when no eligible parents remain."""
-        if not self.eligible:
-            self.done = True
-            return
-
-        count = random.randint(1, self.params['max_per_tick'])
-        for _ in range(count):
-            if not self.eligible:
-                break
-            self._spawn_one()
-    def _pub_heartbeat(self):
-        hdr = Header()
-        hdr.stamp = self.get_clock().now().to_msg()
-        hdr.frame_id = self.get_name()    # e.g. "navigator" or "bridge_node"
-        self.hb_pub.publish(hdr)
-    def _spawn_one(self):
-        parent = random.choice(self.eligible)
-        px, py = parent['x'], parent['y']
-
-        # outward‐biased angle
-        dx, dy = px - self.cx, py - self.cy
-        base = math.atan2(dy, dx) if (dx or dy) else random.uniform(0, 2*math.pi)
-        angle = base + random.uniform(-math.pi/3, math.pi/3)
-        dist  = random.uniform(self.step, 3*self.step)
-
-        x = px + math.cos(angle)*dist
-        y = py + math.sin(angle)*dist
-
-        # clamp to bounds
-        x = min(max(x, self.params['x_min']), self.params['x_max'])
-        y = min(max(y, self.params['y_min']), self.params['y_max'])
-        wx0 = self.params['wall_x_min']
-        wx1 = self.params['wall_x_max']
-        wy0 = self.params['wall_y_min']
-        wy1 = self.params['wall_y_max']
-        if wx0 < x < wx1 and wy0 < y < wy1:
-            return
-        self.spawn_fn(x, y, self.frame)
-
-        parent['children'] += 1
-        if parent['children'] >= self.survival:
-            self.eligible.remove(parent)
-        self.eligible.append({'x': x, 'y': y, 'children': 0})
-
-class ImprovedFireSpawner(Node):
+class CircularClusterSpawner(Node):
+    """Spawns pillars in an expanding circular cluster bounded by a rectangular region."""
     def __init__(self):
-        super().__init__('improved_fire_spawner')
-        self.hb_pub = self.create_publisher(Header, 'sync/heartbeat', 10)
-        self.create_timer(1.0, self._pub_heartbeat)
-        
-        self.declare_parameter('pillar_radius',           0.025)
-        self.declare_parameter('spawn_interval',          0.75)
-        self.declare_parameter('max_per_tick',            3)
-        self.declare_parameter('max_children_per_parent', 3)
-        self.declare_parameter('x_min',  0.0)
-        self.declare_parameter('x_max',  3.61 - 0.25)
-        self.declare_parameter('y_min', -1.0)
-        self.declare_parameter('y_max',  3.61 - 0.25)
-        self.declare_parameter('wall_x_center',   2.0)
-        self.declare_parameter('wall_thickness',  0.35)
-        self.declare_parameter('wall_y_min',     -0.61)
-        self.declare_parameter('wall_y_max',      2.5)
-        p  = self.get_parameter
-        wc = p('wall_x_center').value
-        wt = p('wall_thickness').value
+        super().__init__('circular_cluster_spawner')
 
-        self.params = {
-            # core
-            'pillar_radius':           p('pillar_radius').value,
-            'spawn_interval':          p('spawn_interval').value,
-            'max_per_tick':            p('max_per_tick').value,
-            'max_children_per_parent': p('max_children_per_parent').value,
-            # corridor
-            'x_min':                   p('x_min').value,
-            'x_max':                   p('x_max').value,
-            'y_min':                   p('y_min').value,
-            'y_max':                   p('y_max').value,
-            # wall
-            'wall_x_min':              wc - wt/2.0,
-            'wall_x_max':              wc + wt/2.0,
-            'wall_y_min':              p('wall_y_min').value,
-            'wall_y_max':              p('wall_y_max').value,
-        }
+        # Growth and timing parameters
+        self.declare_parameter('spread_rate',    0.1)    # meters per second radial growth
+        self.declare_parameter('angle_step_deg', 20.0)   # degrees between pillars on each ring
+        self.declare_parameter('spawn_interval', 1.0)    # seconds between rings
+        self.declare_parameter('fill_duration',  15.0)   # seconds total
 
-        self.create_subscription(
-            PointStamped,
-            '/fire_triggers',
-            self._on_trigger,
-            10
-        )
+        # Boundary of allowable region
+        self.declare_parameter('region_x_min', 2.0)
+        self.declare_parameter('region_x_max', 3.4)
+        self.declare_parameter('region_y_min', 0.0)
+        self.declare_parameter('region_y_max', 3.5)
 
-    
-        self.cli = self.create_client(SpawnEntity, '/spawn_entity')
-        if not self.cli.wait_for_service(timeout_sec=5.0):
-            self.get_logger().error("spawn_entity service not available, shutting down.")
+        p = self.get_parameter
+        self.spread_rate    = p('spread_rate').value
+        self.angle_step     = math.radians(p('angle_step_deg').value)
+        self.spawn_interval = p('spawn_interval').value
+        self.fill_duration  = p('fill_duration').value
+        self.x_min = p('region_x_min').value
+        self.x_max = p('region_x_max').value
+        self.y_min = p('region_y_min').value
+        self.y_max = p('region_y_max').value
+
+        # Gazebo spawn service
+        self.spawn_cli = self.create_client(SpawnEntity, 'spawn_entity')
+        if not self.spawn_cli.wait_for_service(timeout_sec=5.0):
+            self.get_logger().error('spawn_entity service unavailable; shutting down.')
             rclpy.shutdown()
             return
 
-        self.sdf = """
-<sdf version='1.6'>
+        # Publisher for pillar positions
+        self.pillar_pub = self.create_publisher(PointStamped, 'twin/pillars', 10)
+
+        # SDF template for a pillar
+        self.sdf = '''<sdf version='1.6'>
   <model name='fire_pillar_{i}'>
     <static>true</static>
     <link name='link'>
       <collision name='col'>
         <geometry><cylinder>
-          <radius>{r_p:.3f}</radius>
-          <length>{length:.3f}</length>
+          <radius>0.035</radius>
+          <length>2.5</length>
         </cylinder></geometry>
       </collision>
       <visual name='vis'>
         <geometry><cylinder>
-          <radius>{r_p:.3f}</radius>
-          <length>{length:.3f}</length>
+          <radius>0.035</radius>
+          <length>2.5</length>
         </cylinder></geometry>
-        <material><ambient>0.9 0.4 0.1 1</ambient><diffuse>0.9 0.4 0.1 1</diffuse></material>
       </visual>
     </link>
   </model>
-</sdf>
-"""
+</sdf>'''
 
+        # Internal state
+        self.center_x = None
+        self.center_y = None
+        self.center_frame = None
+        self.start_time = None
+        self.spawned_rings = set()
         self.next_idx = 0
-        self.active_plumes = []
-        self.timer = self.create_timer(
-            self.params['spawn_interval'],
-            self._on_timer)
 
-        self.get_logger().info("ImprovedFireSpawner ready.")
+        # Subscribe to trigger topic
+        self.create_subscription(
+            PointStamped,
+            'fire_triggers',
+            self._on_trigger,
+            10
+        )
 
-    def _pub_heartbeat(self):
-      hdr = Header()
-      hdr.stamp = self.get_clock().now().to_msg()
-      hdr.frame_id = self.get_name()    # e.g. "navigator" or "bridge_node"
-      self.hb_pub.publish(hdr)
-    def _spawn_entity(self, x, y, frame):
-        idx = self.next_idx; self.next_idx += 1
+        # Timer to grow cluster
+        self.create_timer(self.spawn_interval, self._on_timer)
+        self.get_logger().info('CircularClusterSpawner ready; awaiting /fire_triggers.')
+
+    def _on_trigger(self, msg: PointStamped):
+        self.center_x = msg.point.x
+        self.center_y = msg.point.y
+        self.center_frame = msg.header.frame_id
+        self.start_time = self.get_clock().now()
+        self.spawned_rings.clear()
+        self.next_idx = 0
+        self.get_logger().info(f'Trigger at ({self.center_x:.2f}, {self.center_y:.2f}); starting cluster growth.')
+
+    def _on_timer(self):
+        if self.start_time is None:
+            return
+        elapsed = (self.get_clock().now() - self.start_time).nanoseconds * 1e-9
+        if elapsed > self.fill_duration:
+            self.get_logger().info('Cluster growth complete; stopping.')
+            self.start_time = None
+            return
+
+        ring = int(math.floor(elapsed / self.spawn_interval))
+        if ring in self.spawned_rings:
+            return
+        self.spawned_rings.add(ring)
+        radius = self.spread_rate * elapsed
+        self._spawn_ring(radius)
+
+    def _spawn_ring(self, radius: float):
+        angle = 0.0
+        while angle < 2 * math.pi:
+            x = self.center_x + radius * math.cos(angle)
+            y = self.center_y + radius * math.sin(angle)
+            # Enforce rectangular boundary
+            if self.x_min <= x <= self.x_max and self.y_min <= y <= self.y_max:
+                self._spawn_pillar(x, y)
+            angle += self.angle_step
+
+    def _spawn_pillar(self, x: float, y: float):
         req = SpawnEntity.Request()
-        req.name            = f'pillar_{idx}'
-        req.xml             = self.sdf.format(i=idx,
-                                               r_p=self.params['pillar_radius'],
-                                               length=2.5)
-        req.robot_namespace = ''
-        req.reference_frame = frame
+        req.name = f'pillar_{self.next_idx}'
+        req.xml = self.sdf.format(i=self.next_idx)
+        req.reference_frame = self.center_frame
         req.initial_pose.position.x = x
         req.initial_pose.position.y = y
         req.initial_pose.position.z = 1.25
         req.initial_pose.orientation.w = 1.0
+        self.spawn_cli.call_async(req)
 
-        fut = self.cli.call_async(req)
-        fut.add_done_callback(
-            lambda f, i=idx, xx=x, yy=y: self._on_spawn_response(f, i, xx, yy))
+        pt = PointStamped()
+        pt.header.stamp = self.get_clock().now().to_msg()
+        pt.header.frame_id = self.center_frame
+        pt.point.x = x
+        pt.point.y = y
+        self.pillar_pub.publish(pt)
 
-    def _on_spawn_response(self, fut, idx, x, y):
-        try:
-            res = fut.result()
-            if res.success:
-                self.get_logger().info(f"Spawned pillar_{idx} at ({x:.2f},{y:.2f})")
-            else:
-                self.get_logger().error(
-                    f"pillar_{idx} failed: {res.status_message}")
-        except Exception as e:
-            self.get_logger().error(f"pillar_{idx} exception: {e}")
+        self.next_idx += 1
 
-    def _on_trigger(self, msg: PointStamped):
-        self.get_logger().info(
-            f"Trigger at {msg.header.frame_id} ({msg.point.x:.2f},{msg.point.y:.2f})")
-
-        # immediate spawn of the detection point
-        self._spawn_entity(msg.point.x, msg.point.y, msg.header.frame_id)
-
-        # start a new plume
-        plume = PillarPlume(
-            msg.point.x, msg.point.y,
-            msg.header.frame_id, self.params,
-            self._spawn_entity)
-        self.active_plumes.append(plume)
-
-    def _on_timer(self):
-        # advance each plume; remove finished ones
-        for plume in self.active_plumes[:]:
-            plume.tick()
-            if plume.done:
-                self.active_plumes.remove(plume)
 
 def main(args=None):
     rclpy.init(args=args)
-    node = ImprovedFireSpawner()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
+    node = CircularClusterSpawner()
+    try:
+        rclpy.spin(node)
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
 
 if __name__ == '__main__':
     main()

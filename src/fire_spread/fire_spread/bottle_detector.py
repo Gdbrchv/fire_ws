@@ -10,7 +10,6 @@ from tf2_ros import Buffer, TransformListener
 from tf2_ros import LookupException, ConnectivityException, ExtrapolationException
 from tf2_geometry_msgs import do_transform_point
 from rclpy.time import Time
-from std_msgs.msg import Header
 def quaternion_to_yaw(x, y, z, w):
     siny_cosp = 2.0 * (w * z + x * y)
     cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
@@ -23,21 +22,16 @@ class LidarBottleDetector(Node):
     """
     def __init__(self):
         super().__init__('lidar_bottle_detector')
-        self.hb_pub = self.create_publisher(Header, 'sync/heartbeat', 10)
-        self.create_timer(1.0, self._pub_heartbeat)
-        self.sub = self.create_subscription(
-            LaserScan,
-            '/scan',
-            self.cb_scan,
-            10)
-        self.pub = self.create_publisher(PointStamped, '/fire_triggers', 10)
+
+        self.sub = self.create_subscription(LaserScan,'scan',self.cb_scan,10)
+        self.pub = self.create_publisher(PointStamped, 'fire_triggers', 10)
 
         self.declare_parameter('eps',       0.05)
         self.declare_parameter('min_samples', 3)
         self.declare_parameter('min_d',     0.05)
-        self.declare_parameter('max_d',     0.30)
-        self.declare_parameter('max_shape_ratio', 3.0)
-        self.declare_parameter('min_dist',  0.2)
+        self.declare_parameter('max_d',     0.25)
+        self.declare_parameter('max_shape_ratio', 5.0)
+        self.declare_parameter('min_dist',  0.1)
         self.declare_parameter('max_dist',  2.0)
 
         self.eps           = self.get_parameter('eps').get_parameter_value().double_value
@@ -55,11 +49,7 @@ class LidarBottleDetector(Node):
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.detected = False
   
-    def _pub_heartbeat(self):
-      hdr = Header()
-      hdr.stamp = self.get_clock().now().to_msg()
-      hdr.frame_id = self.get_name()    # e.g. "navigator" or "bridge_node"
-      self.hb_pub.publish(hdr)
+
 
     def cb_scan(self, scan: LaserScan):
         if self.detected:
@@ -123,11 +113,7 @@ class LidarBottleDetector(Node):
             self.detected = True
             self.destroy_subscription(self.sub)
 
-        def _pub_heartbeat(self):
-            hdr = Header()
-            hdr.stamp = self.get_clock().now().to_msg()
-            hdr.frame_id = self.get_name()    # e.g. "navigator" or "bridge_node"
-            self.hb_pub.publish(hdr)
+
 def main(args=None):
     rclpy.init(args=args)
     node = LidarBottleDetector()

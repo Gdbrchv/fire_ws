@@ -2,36 +2,61 @@
 import os
 
 from launch import LaunchDescription
-from launch.actions import ExecuteProcess, TimerAction
+from launch.actions import IncludeLaunchDescription, TimerAction, ExecuteProcess
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import PathJoinSubstitution
+from launch_ros.substitutions import FindPackageShare
 from launch_ros.actions import Node
 
 def generate_launch_description():
-    # 1) TurtleBot3 in Gazebo
-    tb3 = ExecuteProcess(
-        cmd=[
-            'ros2', 'launch', 'turtlebot3_gazebo',
-            'turtlebot3_world.launch.py',
-            f"world:={os.path.expanduser('~/fire_ws/fire_rescue.world')}"
-        ], output='screen'
+    pkg_share = FindPackageShare('fire_spread').find('fire_spread')
+    
+    gazebo_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            PathJoinSubstitution([
+                FindPackageShare('turtlebot3_gazebo'),
+                'launch',
+                'turtlebot3_world.launch.py'
+            ])
+        ]),
+        launch_arguments={
+            'world': '/home/abdul/fire_ws/fire_rescue.world'
+        }.items()
+    )
+    reset_world = ExecuteProcess(
+            cmd=[
+                'ros2', 'service', 'call', '/reset_world',
+                'std_srvs/srv/Empty', '{}'
+            ],
+            output='screen'
+        )
+    reset_timer = TimerAction(
+        period=6.0,     
+        actions=[reset_world]
     )
 
-    # 2) Nav2 with SLAM
-    nav2 = ExecuteProcess(
-        cmd=[
-            'ros2', 'launch', 'turtlebot3_navigation2',
-            'navigation2.launch.py', 'slam:=True', 'use_sim_time:=True',
-            "params_file:=/home/abdul/fire_ws/src/starter.yaml"
-        ], output='screen'
+    nav2_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource([
+            PathJoinSubstitution([
+                FindPackageShare('turtlebot3_navigation2'),
+                'launch',
+                'navigation2.launch.py'
+            ])
+        ]),
+        launch_arguments={
+            'slam': 'True',
+            'use_sim_time': 'True',
+            'autostart': 'True',
+            'params_file': os.path.join(pkg_share, 'src', 'starter.yaml')
+        }.items()
     )
 
-    # 3) Navigator immediately
     navigator = Node(
         package='fire_spread', executable='navigator',
         name='navigator', output='screen',
         parameters=[{'use_sim_time': True}],
     )
 
-    # 4–6) Delay these three by 60 s
     spawner = Node(
         package='fire_spread', executable='spawn_pillar_fire',
         name='spawn_pillar_fire', output='screen',
@@ -48,9 +73,17 @@ def generate_launch_description():
         parameters=[{'use_sim_time': True}],
     )
 
+  
     delayed = TimerAction(
         period=60.0,
         actions=[spawner, detector, rescue],
     )
 
-    return LaunchDescription([tb3, nav2, navigator, delayed])
+    
+    return LaunchDescription([
+        gazebo_launch,
+        reset_timer,
+        nav2_launch,
+        navigator,
+        delayed,
+    ])
